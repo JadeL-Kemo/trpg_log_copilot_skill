@@ -1,18 +1,30 @@
 # TRPG Log Copilot 跑团助手
 
 [![Skill Type](https://img.shields.io/badge/CodeBuddy-SKILL-blue)](https://www.codebuddy.ai/)
-[![Version](https://img.shields.io/badge/version-1.3-green)]()
+[![Version](https://img.shields.io/badge/version-1.4-green)]()
 
-将 AI Agent 变成你的跑团副官/秘书/私人助手。支持 Player 和 GM 双模式。
+将 AI Agent 变成跑团副官/秘书/私人助手。支持 Player 和 GM 双模式。
+
+## 设计初衷
+
+**淘汰纸笔。** 跑团笔记的经典死法：
+
+> 线索贴满软木板 → 时间线写在另一张纸 → NPC 名字记不住 → 骰子结果忘了 → 推测和事实混在一起 → 花里胡哨的东西越积越多 → 下次开团时盯着一堆纸，不知道哪个是重点。
+
+这个 SKILL 解决**信息管理问题**，而不是替代玩家跑团。采用"副官机制"：
+
+- **AI 不扮演角色卡**——玩家做决定，Agent 管档案
+- **每轮先扫仪表盘**——当前位置、活跃线索、紧急待办（约 2KB，Token 开销可忽略）
+- **事实和推测永不混淆**——三级标签（🟢已证实/🟡需证实/🔴仅推测）
+- **换平台只复制一个文件夹**——Markdown 纯文本，任何阅读器都能看
 
 ## 这是什么？
 
-一个 CodeBuddy SKILL，导入后 Agent 将扮演与团本背景匹配的辅助角色：
+一个 CodeBuddy SKILL，导入后 Agent 扮演与团本背景匹配的辅助角色：
 - 将军 → Agent = 私人副官
 - 董事长 → Agent = 秘书
 - 机械神甫 → Agent = 伺服头骨
 - 法师 → Agent = 会说话的魔法书
-- ……更多由你定义
 
 Agent 不参与剧情，专注后勤辅助。
 
