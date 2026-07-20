@@ -114,9 +114,9 @@ def fallback_chm_extract(filepath):
     # Also check PATH
     import subprocess
     try:
-        result = subprocess.run(['where', '7z'], capture_output=True, text=True, timeout=5)
+        result = subprocess.run(['where', '7z'], capture_output=True, timeout=5)
         if result.returncode == 0:
-            for line in result.stdout.strip().split('\n'):
+            for line in result.stdout.decode('gbk', errors='replace').strip().split('\n'):
                 p = line.strip()
                 if p and os.path.exists(p):
                     seven_zip_paths.insert(0, p)
@@ -169,14 +169,20 @@ def fallback_chm_extract(filepath):
 
     # Fallback: hh.exe (Windows only)
     try:
-        import tempfile
-        tmpdir = tempfile.mkdtemp()
+        import tempfile, shutil
+        tmpdir = str(Path(filepath).parent / '.chm_extract')
+        if os.path.exists(tmpdir):
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        os.makedirs(tmpdir, exist_ok=True)
         subprocess.run(
             ['hh.exe', '-decompile', tmpdir, filepath],
-            capture_output=True, timeout=60, check=False
+            capture_output=True, timeout=300, check=False
         )
-        for html_file in sorted(Path(tmpdir).glob("*.htm*")):
-            text = html_file.read_text(encoding='utf-8', errors='replace')
+        for html_file in sorted(Path(tmpdir).rglob("*.htm*")):
+            raw = html_file.read_bytes()
+            meta_match = re.search(rb'charset=([a-zA-Z0-9-]+)', raw[:4096])
+            enc = meta_match.group(1).decode('ascii') if meta_match else 'utf-8'
+            text = raw.decode(enc, errors='replace')
             text = html_to_markdown(text)
             if len(text.strip()) > 50:
                 pages.append({"title": html_file.stem, "content": text})

@@ -90,7 +90,7 @@ def install_deps(missing_names, deps_dict, mirror="tsinghua"):
 
     to_install = []
     for m in missing_names:
-        name = m.split(" ")[0]
+        name = m.strip().split(" ")[0]
         for dep_name, info in deps_dict.items():
             if dep_name == name and "pip" in info:
                 to_install.append(info["pip"])
