@@ -106,29 +106,11 @@ def fallback_chm_extract(filepath):
     pages = []
 
     # Try 7-Zip first (most reliable)
-    seven_zip_paths = [
-        r"C:\Program Files\7-Zip\7z.exe",
-        r"C:\Program Files (x86)\7-Zip\7z.exe",
-        r"D:\Program Files\7-Zip\7z.exe",
-    ]
-    # Also check PATH
-    import subprocess
-    try:
-        result = subprocess.run(['where', '7z'], capture_output=True, timeout=5)
-        if result.returncode == 0:
-            for line in result.stdout.decode('gbk', errors='replace').strip().split('\n'):
-                p = line.strip()
-                if p and os.path.exists(p):
-                    seven_zip_paths.insert(0, p)
-    except Exception:
-        pass
-
-    for sz_path in seven_zip_paths:
-        if not os.path.exists(sz_path):
-            continue
+    sz_path = _find_tool('7z')
+    if sz_path:
         try:
             import tempfile
-            tmpdir = tempfile.mkdtemp(prefix='chm_7z_')
+            tmpdir = tempfile.mkdtemp()
             subprocess.run(
                 [sz_path, 'x', filepath, f'-o{tmpdir}', '-y'],
                 capture_output=True, timeout=120, check=False
@@ -159,8 +141,8 @@ def fallback_chm_extract(filepath):
                     for key, val in sorted(t.items()):
                         if isinstance(val, Path):
                             try:
-                                html = val.read_text(encoding='utf-8', errors='replace')
-                                text = html_to_markdown(html)
+                                raw = val.read_bytes()
+                                text = html_to_markdown(raw)
                                 if len(text.strip()) > 30:
                                     result.append({
                                         "title": val.stem,
@@ -208,24 +190,7 @@ def fallback_chm_extract(filepath):
             continue
 
     # Fallback: hh.exe (Windows only)
-    # Check common install paths in addition to PATH
-    hh_paths = [
-        r"C:\Windows\hh.exe",
-        r"C:\Windows\System32\hh.exe",
-    ]
-    hh_exe = None
-    for p in hh_paths:
-        if os.path.exists(p):
-            hh_exe = p
-            break
-    if not hh_exe:
-        try:
-            result = subprocess.run(['where', 'hh.exe'], capture_output=True, timeout=5)
-            if result.returncode == 0:
-                hh_exe = result.stdout.decode('gbk', errors='replace').strip().split('\n')[0].strip()
-        except Exception:
-            pass
-
+    hh_exe = _find_tool('hh')  # Auto-search + cache
     if hh_exe:
         try:
             import tempfile, shutil
@@ -476,22 +441,90 @@ def parse_pdf(filepath):
 # 通用工具函数
 # ============================================================================
 
+def _tool_cache_path():
+    """Path to JSON file caching tool locations."""
+    return Path.home() / '.trpg_tools.json'
+
+
+def _find_tool(name, search_names=None):
+    """Find a tool, caching the result.
+
+    Args:
+        name: Cache key (e.g. '7z', 'hh')
+        search_names: Filenames for `where` command
+    Returns str or None.
+    """
+    cache = _tool_cache_path()
+    tools = {}
+    if cache.exists():
+        try:
+            tools = json.loads(cache.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+
+    if name in tools and tools[name] and os.path.exists(tools[name]):
+        return tools[name]
+
+    if search_names is None:
+        search_names = [f'{name}.exe', name]
+
+    for sn in search_names:
+        try:
+            result = subprocess.run(['where', sn], capture_output=True, timeout=5)
+            if result.returncode == 0:
+                found = result.stdout.decode('gbk', errors='replace').strip().split('\n')[0].strip()
+                if os.path.exists(found):
+                    tools[name] = found
+                    cache.write_text(json.dumps(tools, indent=2), encoding='utf-8')
+                    return found
+        except Exception:
+            pass
+
+    common_templates = {
+        '7z': ['{d}:\\Program Files\\7-Zip\\7z.exe',
+               '{d}:\\Program Files (x86)\\7-Zip\\7z.exe'],
+        'hh': ['{d}:\\Windows\\hh.exe', '{d}:\\Windows\\System32\\hh.exe'],
+    }
+    drives = ['C', 'D', 'E', 'F', 'G']
+    for template in common_templates.get(name, []):
+        for drive in drives:
+            path = template.replace('{d}', drive)
+            if os.path.exists(path):
+                tools[name] = path
+                cache.write_text(json.dumps(tools, indent=2), encoding='utf-8')
+                return path
+
+    return None
+
+
 def sanitize_filename(name):
     """Remove characters unsafe for filenames."""
     return re.sub(r'[\\/*?:"<>|]', '', name).strip().replace(' ', '_')
 
 
-def html_to_markdown(html_content):
-    """Convert HTML to basic markdown."""
+def html_to_markdown(html_bytes_or_str, charset='utf-8'):
+    """Convert HTML to basic markdown. Bytes: auto-detect charset from <meta>."""
     try:
         from bs4 import BeautifulSoup
-        soup = BeautifulSoup(html_content, 'html.parser')
+
+        if isinstance(html_bytes_or_str, bytes):
+            raw = html_bytes_or_str
+            meta = re.search(rb'charset=([a-zA-Z0-9-]+)', raw[:4096])
+            detected = meta.group(1).decode('ascii') if meta else charset
+            soup = BeautifulSoup(raw, 'html.parser', from_encoding=detected)
+        else:
+            soup = BeautifulSoup(html_bytes_or_str, 'html.parser')
+
         for tag in soup(['script', 'style']):
             tag.decompose()
         return soup.get_text(separator='\n', strip=True)
     except ImportError:
-        # Crude regex-based HTML stripping
-        clean = re.sub(r'<script[^>]*>.*?</script>', '', html_content, flags=re.DOTALL | re.I)
+        content = html_bytes_or_str
+        if isinstance(content, bytes):
+            meta = re.search(rb'charset=([a-zA-Z0-9-]+)', content[:4096])
+            detected = meta.group(1).decode('ascii') if meta else charset
+            content = content.decode(detected, errors='replace')
+        clean = re.sub(r'<script[^>]*>.*?</script>', '', content, flags=re.DOTALL | re.I)
         clean = re.sub(r'<style[^>]*>.*?</style>', '', clean, flags=re.DOTALL | re.I)
         clean = re.sub(r'<[^>]+>', ' ', clean)
         clean = re.sub(r'\s+', ' ', clean).strip()
