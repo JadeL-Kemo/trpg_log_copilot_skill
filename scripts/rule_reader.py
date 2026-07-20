@@ -133,31 +133,71 @@ def fallback_chm_extract(filepath):
                 [sz_path, 'x', filepath, f'-o{tmpdir}', '-y'],
                 capture_output=True, timeout=120, check=False
             )
-            # Collect HTML files
+            # Collect HTML files with hierarchy preserved
             tmp = Path(tmpdir)
             html_files = list(tmp.rglob('*.htm*'))
             if html_files:
-                # Group by parent directory
-                from collections import defaultdict
-                sections = defaultdict(list)
+                # Build tree from relative paths
+                tree = {}
                 for hf in html_files:
-                    sections[hf.parent.name].append(hf)
+                    try:
+                        rel = hf.relative_to(tmp)
+                    except ValueError:
+                        continue
+                    parts = rel.parts
+                    node = tree
+                    for part in parts[:-1]:  # Directory hierarchy
+                        if part not in node:
+                            node[part] = {}
+                        node = node[part]
+                    # Leaf: store the file
+                    node[parts[-1]] = hf
 
-                for section_name, files in sorted(sections.items()):
-                    texts = []
-                    for hf in sorted(files)[:50]:  # Cap per section
-                        try:
-                            html = hf.read_text(encoding='utf-8', errors='replace')
-                            text = html_to_markdown(html)
-                            if len(text.strip()) > 30:
-                                texts.append(f"<!-- {hf.name} -->\n{text}")
-                        except Exception:
-                            pass
-                    if texts:
-                        pages.append({
-                            "title": section_name,
-                            "content": '\n\n'.join(texts)
-                        })
+                # Recursively flatten tree into pages with depth
+                def _flatten_tree(t, depth=0):
+                    result = []
+                    for key, val in sorted(t.items()):
+                        if isinstance(val, Path):
+                            try:
+                                html = val.read_text(encoding='utf-8', errors='replace')
+                                text = html_to_markdown(html)
+                                if len(text.strip()) > 30:
+                                    result.append({
+                                        "title": val.stem,
+                                        "content": f"<!-- {val.name} -->\n{text}",
+                                        "depth": depth + 1
+                                    })
+                            except Exception:
+                                pass
+                        elif isinstance(val, dict):
+                            children = _flatten_tree(val, depth + 1)
+                            if children:
+                                # Insert folder as section header
+                                result.append({
+                                    "title": key,
+                                    "content": "",
+                                    "depth": depth + 1,
+                                    "is_section": True
+                                })
+                                result.extend(children)
+                    return result
+
+                pages = _flatten_tree(tree)
+                # Deduplicate: merge single-child sections
+                merged = []
+                i = 0
+                while i < len(pages):
+                    pg = pages[i]
+                    if pg.get('is_section') and i + 1 < len(pages) and pages[i + 1].get('depth', 0) > pg.get('depth', 0):
+                        merged.append(pages[i + 1])
+                        i += 2
+                    elif pg.get('is_section'):
+                        merged.append({"title": pg['title'], "content": "", "depth": pg['depth']})
+                        i += 1
+                    else:
+                        merged.append(pg)
+                        i += 1
+                pages = merged
 
             shutil.rmtree(tmpdir, ignore_errors=True)
             if pages:
@@ -178,14 +218,70 @@ def fallback_chm_extract(filepath):
             ['hh.exe', '-decompile', tmpdir, filepath],
             capture_output=True, timeout=300, check=False
         )
-        for html_file in sorted(Path(tmpdir).rglob("*.htm*")):
-            raw = html_file.read_bytes()
-            meta_match = re.search(rb'charset=([a-zA-Z0-9-]+)', raw[:4096])
-            enc = meta_match.group(1).decode('ascii') if meta_match else 'utf-8'
-            text = raw.decode(enc, errors='replace')
-            text = html_to_markdown(text)
-            if len(text.strip()) > 50:
-                pages.append({"title": html_file.stem, "content": text})
+        # Collect all HTML files and build hierarchy tree
+        tmp = Path(tmpdir)
+        html_files = list(tmp.rglob("*.htm*"))
+        if html_files:
+            tree = {}
+            for hf in html_files:
+                try:
+                    rel = hf.relative_to(tmp)
+                except ValueError:
+                    continue
+                parts = rel.parts
+                node = tree
+                for part in parts[:-1]:
+                    if part not in node:
+                        node[part] = {}
+                    node = node[part]
+                node[parts[-1]] = hf
+
+            def _flatten_tree(t, depth=0):
+                result = []
+                for key, val in sorted(t.items()):
+                    if isinstance(val, Path):
+                        try:
+                            raw = val.read_bytes()
+                            meta_match = re.search(rb'charset=([a-zA-Z0-9-]+)', raw[:4096])
+                            enc = meta_match.group(1).decode('ascii') if meta_match else 'utf-8'
+                            text = raw.decode(enc, errors='replace')
+                            text = html_to_markdown(text)
+                            if len(text.strip()) > 50:
+                                result.append({
+                                    "title": val.stem,
+                                    "content": text,
+                                    "depth": depth + 1
+                                })
+                        except Exception:
+                            pass
+                    elif isinstance(val, dict):
+                        children = _flatten_tree(val, depth + 1)
+                        if children:
+                            result.append({
+                                "title": key,
+                                "content": "",
+                                "depth": depth + 1,
+                                "is_section": True
+                            })
+                            result.extend(children)
+                return result
+
+            pages = _flatten_tree(tree)
+            # Deduplicate single-child section headers
+            merged = []
+            i = 0
+            while i < len(pages):
+                pg = pages[i]
+                if pg.get('is_section') and i + 1 < len(pages) and pages[i + 1].get('depth', 0) > pg.get('depth', 0):
+                    merged.append(pages[i + 1])
+                    i += 2
+                elif pg.get('is_section'):
+                    merged.append({"title": pg['title'], "content": "", "depth": pg['depth']})
+                    i += 1
+                else:
+                    merged.append(pg)
+                    i += 1
+            pages = merged
         shutil.rmtree(tmpdir, ignore_errors=True)
         if pages:
             return {"source": "chm+hh", "pages": pages, "structure": "flat"}
@@ -362,6 +458,11 @@ def parse_pdf(filepath):
 # 通用工具函数
 # ============================================================================
 
+def sanitize_filename(name):
+    """Remove characters unsafe for filenames."""
+    return re.sub(r'[\\/*?:"<>|]', '', name).strip().replace(' ', '_')
+
+
 def html_to_markdown(html_content):
     """Convert HTML to basic markdown."""
     try:
@@ -459,12 +560,29 @@ def process_rulebook(filepath, output_dir, rule_name):
     tables = [p for p in pages if p.get('is_table')]
     text_pages = [p for p in pages if not p.get('is_table')]
 
-    # Save raw text pages
+    # Save raw text pages with hierarchy-aware filenames
+    # Track depth to build section-based numbering
+    section_counters = {}
     for i, page in enumerate(text_pages):
-        page_id = page.get('page_number', i + 1)
-        filename = raw_dir / f"{page_id:04d}.md"
-        content = f"# {page['title']}\n\n{page['content']}"
-        filename.write_text(content, encoding='utf-8')
+        depth = page.get('depth', 2)
+        title = page['title']
+        content = page['content']
+
+        # Reset child counters when at a shallower depth
+        for d in list(section_counters.keys()):
+            if d > depth:
+                del section_counters[d]
+        section_counters[depth] = section_counters.get(depth, 0) + 1
+
+        # Build filename prefix from depth counters
+        prefix_parts = []
+        for d in range(1, depth + 1):
+            prefix_parts.append(f"{section_counters.get(d, 1):02d}")
+        file_prefix = '_'.join(prefix_parts)
+
+        filename = raw_dir / f"{file_prefix}_{sanitize_filename(title)[:40]}.md"
+        heading = '#' * min(depth, 6)
+        filename.write_text(f"{heading} {title}\n\n{content}", encoding='utf-8')
 
     # Save tables as JSON
     for i, table in enumerate(tables):
@@ -488,10 +606,16 @@ def process_rulebook(filepath, output_dir, rule_name):
 
         for page in pages:
             if page.get('is_table'):
-                full_md.append(f"\n### {page['title']}\n")
+                depth = min(page.get('depth', 3), 6)
+                full_md.append(f"\n{'#' * depth} {page['title']}\n")
+            elif page.get('content'):  # Content-bearing page
+                depth = min(page.get('depth', 2), 6)
+                full_md.append(f"\n{'#' * depth} {page['title']}\n")
+                full_md.append(page['content'])
             else:
-                full_md.append(f"\n## {page['title']}\n")
-            full_md.append(page['content'])
+                # Section header only (folder)
+                depth = min(page.get('depth', 2), 6)
+                full_md.append(f"\n{'#' * depth} {page['title']}\n")
 
         full_content = '\n\n'.join(full_md)
         if len(full_content) < 2 * 1024 * 1024:  # Also check size < 2MB
@@ -530,9 +654,15 @@ def process_rulebook(filepath, output_dir, rule_name):
     for page in pages[:1000]:  # Cap entries at 1000 for very large rulebooks
         title = page['title']
         is_table = page.get('is_table', False)
-        preview = page['content'][:100].replace('\n', ' ') + '...'
-        prefix = "📊" if is_table else "📄"
-        index_md.append(f"- {prefix} **{title}** — {preview}")
+        has_content = bool(page.get('content', '').strip())
+        depth = page.get('depth', 2)
+        indent = "  " * (depth - 1)
+        if has_content:
+            preview = page['content'][:80].replace('\n', ' ') + '...'
+            prefix = "📊" if is_table else "📄"
+            index_md.append(f"{indent}- {prefix} **{title}** — {preview}")
+        else:
+            index_md.append(f"{indent}- 📁 **{title}**")
 
     index_md.append("\n## 文件索引\n")
     index_md.append(f"- 完整文本: [`full.md`](full.md)")
