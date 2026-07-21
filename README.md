@@ -1,7 +1,10 @@
 # TRPG Log Copilot — 跑团副官
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-CodeBuddy%20%7C%20通用Agent-purple)]()
+[![CodeBuddy](https://img.shields.io/badge/CodeBuddy-SKILL-blue)](https://www.codebuddy.ai) [![Version](https://img.shields.io/badge/version-1.5.0-green)](https://github.com/JadeL-Kemo/trpg-log-copilot-skill/releases) 
+
+
+
+
 
 **让 AI 成为你的跑团副官。** 车卡辅助、日志归档、线索分析、防超游——零额外配置，解压即用。
 
