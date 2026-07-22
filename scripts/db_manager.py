@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """
-TRPG SQLite 数据库管理器 — FTS5 全文搜索 + 交叉引用 + 导出。
+TRPG SQLite 数据库管理器 — FTS5 + 角色状态追踪 + 交叉引用 + 导出。
 
 Usage:
-    python db_manager.py <db_path> search <keywords>         # 全文搜索(自动带出交叉引用)
-    python db_manager.py <db_path> clue add [JSON]            # 添加线索
-    python db_manager.py <db_path> clue link <id> <id>        # 建立交叉引用
-    python db_manager.py <db_path> export [--limit 50]        # 导出活跃线索→Markdown
-    python db_manager.py <db_path> stats                      # 统计概览
+    python db_manager.py <db_path> search <keywords>              # 全文搜索
+    python db_manager.py <db_path> clue add [JSON]                # 添加线索
+    python db_manager.py <db_path> clue link <id> <id>            # 交叉引用
+    python db_manager.py <db_path> export [--limit 50]            # 导出→Markdown
+    python db_manager.py <db_path> stats                          # 统计概览
+    python db_manager.py <db_path> state init <name> <type> <hp_max> <san_max> [--dex N]
+    python db_manager.py <db_path> state add <name> [--hp N] [--san N] [--loc S] [--status S] --reason S
+    python db_manager.py <db_path> state query <name>             # 变更历史
+    python db_manager.py <db_path> state current [name]           # 当前状态(可选过滤)
 """
 
 import sys
@@ -85,10 +89,37 @@ def cmd_init(db_path):
             INSERT INTO clues_fts(rowid, content, source, confidence)
             VALUES (new.rowid, new.content, new.source, new.confidence);
         END;
+
+        -- ★ v1.6.0: 角色状态追踪 (事件溯源·JSON键值池——兼容CoC/DND/泛规则系统)
+        DROP TABLE IF EXISTS char_state_log;
+        DROP TABLE IF EXISTS char_base;
+        CREATE TABLE IF NOT EXISTS char_base (
+            char_name   TEXT PRIMARY KEY,
+            char_type   TEXT NOT NULL DEFAULT 'pc',
+            base_stats  TEXT NOT NULL DEFAULT '{}',  -- JSON: {"hp":12,"san":60,"ac":15}
+            created_at  TEXT DEFAULT (datetime('now','localtime'))
+        );
+        CREATE TABLE IF NOT EXISTS char_state_log (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            char_name   TEXT NOT NULL,
+            seq         INTEGER NOT NULL,
+            deltas      TEXT NOT NULL DEFAULT '{}',  -- JSON: {"hp":-3,"san":-1}
+            loc_new     TEXT DEFAULT NULL,
+            status_new  TEXT DEFAULT NULL,
+            reason      TEXT NOT NULL,
+            clue_ref    TEXT DEFAULT NULL,
+            scene_ref   TEXT DEFAULT NULL,
+            round       INTEGER DEFAULT NULL,
+            note        TEXT DEFAULT NULL,
+            created_at  TEXT DEFAULT (datetime('now','localtime')),
+            FOREIGN KEY (char_name) REFERENCES char_base(char_name)
+        );
+        CREATE INDEX IF NOT EXISTS idx_csl_name ON char_state_log(char_name);
+        CREATE INDEX IF NOT EXISTS idx_csl_scene ON char_state_log(scene_ref);
     """)
     conn.commit()
     conn.close()
-    print("Database initialized (FTS5 enabled).")
+    print("Database initialized (FTS5 + char_state).")
 
 
 # ==================== 线索 CRUD ====================
@@ -236,11 +267,93 @@ def cmd_stats(db_path):
 
 # ==================== CLI ====================
 
+# ==================== 角色状态追踪 v1.6.0 (JSON键值池) ====================
+
+def cmd_state_init(db_path, name, ctype, base_stats):
+    """base_stats: dict of pool->max, e.g. {"hp":12,"san":60,"ac":15}"""
+    conn = get_conn(db_path)
+    conn.execute("INSERT OR REPLACE INTO char_base VALUES (?,?,?,datetime('now','localtime'))",
+                 (name, ctype, json.dumps(base_stats, ensure_ascii=False)))
+    conn.commit(); conn.close()
+    pools = ", ".join(f"{k}={v}" for k,v in base_stats.items())
+    print(f"state_init: {name} [{ctype}] {pools}")
+
+def cmd_state_add(db_path, name, deltas, loc, status, reason, clue_ref, scene_ref, round_n, note):
+    """deltas: dict of pool->delta, e.g. {"hp":-3,"san":-1}"""
+    conn = get_conn(db_path)
+    seq_row = conn.execute("SELECT COALESCE(MAX(seq),0)+1 FROM char_state_log WHERE char_name=?", (name,)).fetchone()
+    seq = seq_row[0]
+    conn.execute("""INSERT INTO char_state_log
+        (char_name,seq,deltas,loc_new,status_new,reason,clue_ref,scene_ref,round,note)
+        VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (name, seq, json.dumps(deltas, ensure_ascii=False), loc, status, reason, clue_ref, scene_ref, round_n, note))
+    conn.commit(); conn.close()
+    delta_str = " ".join(f"{k}{v:+d}" for k,v in deltas.items())
+    print(f"state_add: {name} seq={seq} {delta_str} reason={reason}")
+
+def cmd_state_query(db_path, name):
+    conn = get_conn(db_path)
+    rows = conn.execute("SELECT seq,deltas,reason,clue_ref,scene_ref,round,created_at FROM char_state_log WHERE char_name=? ORDER BY seq", (name,)).fetchall()
+    if not rows:
+        print(f"No changes recorded for {name}")
+        conn.close(); return
+    print(f"\n=== {name} ===")
+    for r in rows:
+        deltas = json.loads(r['deltas'])
+        d_str = " ".join(f"{k}{v:+d}" for k,v in deltas.items())
+        parts = [f"#{r['seq']}", d_str, f"─ {r['reason']}"]
+        if r['clue_ref']: parts.append(f"[{r['clue_ref']}]")
+        print(" ".join(parts))
+    conn.close()
+
+def cmd_state_current(db_path, name=None):
+    """Compute current state: base_stats + SUM(deltas) per pool."""
+    conn = get_conn(db_path)
+    if name:
+        bases = conn.execute("SELECT char_name,char_type,base_stats FROM char_base WHERE char_name=?", (name,)).fetchall()
+    else:
+        bases = conn.execute("SELECT char_name,char_type,base_stats FROM char_base ORDER BY char_name").fetchall()
+    if not bases:
+        print("No characters tracked. Use 'state init' first.")
+        conn.close(); return
+    print(f"{'Name':<16} {'Type':<4}", end="")
+    # Collect all pool keys
+    all_pools = set()
+    for b in bases:
+        all_pools.update(json.loads(b['base_stats']).keys())
+    pools = sorted(all_pools)
+    max_w = {p: max(len(p), 5) for p in pools}
+    for p in pools:
+        print(f" {p:>{max_w[p]}}", end="")
+    print(f" {'Loc':<14} {'Status':<8} {'Last'}")
+    print("-" * (30 + sum(max_w.values())))
+    for b in bases:
+        base = json.loads(b['base_stats'])
+        # Sum deltas
+        delta_rows = conn.execute("SELECT deltas FROM char_state_log WHERE char_name=? ORDER BY seq", (b['char_name'],)).fetchall()
+        totals = dict(base)
+        for dr in delta_rows:
+            for k, v in json.loads(dr['deltas']).items():
+                totals[k] = totals.get(k, 0) + v
+        # Location/status
+        last = conn.execute("SELECT loc_new,status_new,reason FROM char_state_log WHERE char_name=? ORDER BY seq DESC LIMIT 1", (b['char_name'],)).fetchone()
+        loc_s = last['loc_new'] if last and last['loc_new'] else ''
+        status_s = last['status_new'] if last and last['status_new'] else ''
+        reason_s = last['reason'] if last and last['reason'] else ''
+        print(f"{b['char_name']:<16} {b['char_type']:<4}", end="")
+        for p in pools:
+            cur = totals.get(p, '?')
+            max_v = base.get(p, '?')
+            print(f" {cur if cur!='?' else '?':>{max_w[p]}}", end="")
+        print(f" {loc_s:<14} {status_s:<8} {reason_s}")
+    conn.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description="TRPG Database (FTS5)")
     parser.add_argument("db_path", help="Path to trpg_data.db")
-    parser.add_argument("command", choices=["init", "search", "clue", "stats", "export"])
-    parser.add_argument("args", nargs="*")
+    parser.add_argument("command", choices=["init", "search", "clue", "stats", "export", "state"])
+    parser.add_argument("args", nargs=argparse.REMAINDER)
 
     ns = parser.parse_args()
 
@@ -267,6 +380,57 @@ def main():
 
     elif ns.command == "stats":
         cmd_stats(ns.db_path)
+
+    elif ns.command == "state":
+        if len(ns.args) < 1:
+            print("Usage: state init|add|query|current|list")
+            return
+        sub = ns.args[0]; rest = ns.args[1:]
+        if sub == "init":
+            # state init <name> <type> [--hp N] [--san N] [--ac N] [--any N ...]
+            if len(rest) < 2: print("Usage: state init <name> <type> [--hp N] [--san N] [--ac N] ..."); return
+            name, ctype = rest[0], rest[1]
+            base_stats = {}; i = 2
+            while i < len(rest):
+                if rest[i].startswith('--') and i+1 < len(rest) and not rest[i+1].startswith('--'):
+                    try:
+                        base_stats[rest[i][2:]] = int(rest[i+1])
+                    except ValueError:
+                        base_stats[rest[i][2:]] = rest[i+1]
+                    i += 2
+                else: i += 1
+            if not base_stats: print("Need at least one --pool value (e.g. --hp 12)"); return
+            cmd_state_init(ns.db_path, name, ctype, base_stats)
+        elif sub == "add":
+            # state add <name> [--hp N] [--san N] [--any N ...] --reason S [--loc S] [--status S] [--clue S] [--scene S] [--round N] [--note S]
+            if len(rest) < 1: print("Usage: state add <name> --reason S [--hp N] ..."); return
+            name = rest[0]
+            deltas = {}; reason = None; loc = None; status = None; clue = None; scene = None; round_n = None; note = None
+            i = 1
+            while i < len(rest):
+                if rest[i] == '--reason' and i+1 < len(rest): reason = rest[i+1]; i += 2
+                elif rest[i] == '--loc' and i+1 < len(rest): loc = rest[i+1]; i += 2
+                elif rest[i] == '--status' and i+1 < len(rest): status = rest[i+1]; i += 2
+                elif rest[i] == '--clue' and i+1 < len(rest): clue = rest[i+1]; i += 2
+                elif rest[i] == '--scene' and i+1 < len(rest): scene = rest[i+1]; i += 2
+                elif rest[i] == '--round' and i+1 < len(rest): round_n = int(rest[i+1]); i += 2
+                elif rest[i] == '--note' and i+1 < len(rest): note = rest[i+1]; i += 2
+                elif rest[i].startswith('--') and i+1 < len(rest):
+                    try: deltas[rest[i][2:]] = int(rest[i+1])
+                    except ValueError: deltas[rest[i][2:]] = rest[i+1]
+                    i += 2
+                else: i += 1
+            if not reason: print("Usage: state add <name> --reason S [--hp N] [--any N] ..."); return
+            cmd_state_add(ns.db_path, name, deltas, loc, status, reason, clue, scene, round_n, note)
+        elif sub == "query":
+            if not rest: print("Usage: state query <name>"); return
+            cmd_state_query(ns.db_path, rest[0])
+        elif sub == "current":
+            cmd_state_current(ns.db_path, rest[0] if rest else None)
+        elif sub == "list":
+            cmd_state_current(ns.db_path, None)
+        else:
+            print(f"Unknown state sub: {sub!r} rest={rest!r}; Usage: state init|add|query|current|list")
 
     elif ns.command == "export":
         limit = 50

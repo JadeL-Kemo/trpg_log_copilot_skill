@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [1.6.0] — 2026-07-22
+
+### Added
+
+- **角色状态追踪** — 事件溯源式 HP/SAN/资源变更记录。SQLite 新增 `char_base` + `char_state_log` 两张表。
+- **JSON 键值池** — `state add` 接受任意 `--<池名> <delta>` 对（`--hp -3 --san -1 --spell_l3 -2 --custom_pool -1`）。兼容 CoC/DND/泛规则系统，无预定义字段限制。
+- **db_manager 新增 `state` 子命令** — `state init`（`--<池名> <最大值>`注册角色）、`state add`（记录变更）、`state query`（变更历史）、`state current`（跨角色当前状态汇总表）
+- **reason 固定用语词表 v2** — `references/state_reason_vocab.md`。通用+CoC+DND 三段 + 自定义池命名约定。确保变更原因可被 FTS5 检索和分类统计。
+- **SKILL.md 六步新增步骤 4a** — 每次 HP/SAN/资源变更必须调用 `state add`，禁止只在叙事段落中描述。叙事段落和 SQLite 记录必须双写。
+
+### Changed
+
+- Rule 模板和项目 Rule 新增 HP/SAN 结构化记录指令（FATAL 级）
+- Schema 从固定列（hp_delta/san_delta）重构为 JSON 键值池（deltas TEXT），兼容任意数量资源池
+
+---
+
 ## [1.5.1] — 2026-07-22
 
 ### Changed
