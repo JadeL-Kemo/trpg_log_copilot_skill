@@ -4,7 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ---
 
-## [1.5.0 — 2026-07-21
+## [1.5.1] — 2026-07-22
+
+### Changed
+
+- **信息检索：SQLite 优先** — 移除"≤30条读markdown"阈值陷阱，所有线索/NPC/事件检索从 SQLite FTS5 开始。Markdown 降级为导出视图，不再作为检索入口。
+- **SKILL.md 与 Rule 去重** — 移除角色注入段（身份定义移交项目级 Rule），新增 Rule 前置声明。SKILL 专注详细工作流/工具/规范。
+- **线索格式对齐实际** — SKILL.md 明确数据文件中使用表格式（来源/可靠性列），不再是理论括号标注体。`evidence_standards.md` 新增"实际格式映射"节。
+- **归档上限调整** — 新增 `04a_过往日志.md` 上限 500 行，超出压缩为摘要。对齐 Rule 级归档管理。
+- **平台切换** — 参考源从 `07_跑团规范手册.md` 改为项目 Rule。
+- **六步归档** — 新增 Step 0（扫 `00_当前局势.md`），不再要求首行 `📍归档进度` 格式。
+
+---
+
+## [1.5.0] — 2026-07-21
 
 ### Added
 
