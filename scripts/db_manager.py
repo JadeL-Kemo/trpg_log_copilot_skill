@@ -307,7 +307,7 @@ def cmd_state_query(db_path, name):
     conn.close()
 
 def cmd_state_current(db_path, name=None):
-    """Compute current state: base_stats + SUM(deltas) per pool."""
+    """Show current state. All view: intersection pools. Single view: all pools."""
     conn = get_conn(db_path)
     if name:
         bases = conn.execute("SELECT char_name,char_type,base_stats FROM char_base WHERE char_name=?", (name,)).fetchall()
@@ -316,36 +316,55 @@ def cmd_state_current(db_path, name=None):
     if not bases:
         print("No characters tracked. Use 'state init' first.")
         conn.close(); return
-    print(f"{'Name':<16} {'Type':<4}", end="")
-    # Collect all pool keys
-    all_pools = set()
-    for b in bases:
-        all_pools.update(json.loads(b['base_stats']).keys())
-    pools = sorted(all_pools)
-    max_w = {p: max(len(p), 5) for p in pools}
-    for p in pools:
-        print(f" {p:>{max_w[p]}}", end="")
-    print(f" {'Loc':<14} {'Status':<8} {'Last'}")
-    print("-" * (30 + sum(max_w.values())))
+
+    # Pre-compute totals for all characters
+    char_data = []
     for b in bases:
         base = json.loads(b['base_stats'])
-        # Sum deltas
         delta_rows = conn.execute("SELECT deltas FROM char_state_log WHERE char_name=? ORDER BY seq", (b['char_name'],)).fetchall()
         totals = dict(base)
         for dr in delta_rows:
             for k, v in json.loads(dr['deltas']).items():
                 totals[k] = totals.get(k, 0) + v
-        # Location/status
         last = conn.execute("SELECT loc_new,status_new,reason FROM char_state_log WHERE char_name=? ORDER BY seq DESC LIMIT 1", (b['char_name'],)).fetchone()
-        loc_s = last['loc_new'] if last and last['loc_new'] else ''
-        status_s = last['status_new'] if last and last['status_new'] else ''
-        reason_s = last['reason'] if last and last['reason'] else ''
-        print(f"{b['char_name']:<16} {b['char_type']:<4}", end="")
+        char_data.append({
+            'name': b['char_name'], 'type': b['char_type'],
+            'base': base, 'totals': totals,
+            'loc': last['loc_new'] if last and last['loc_new'] else '',
+            'status': last['status_new'] if last and last['status_new'] else '',
+            'reason': last['reason'] if last and last['reason'] else '',
+        })
+
+    # Pool selection: single char = all pools; all chars = intersection
+    if name:
+        pools = sorted(char_data[0]['base'].keys())
+    else:
+        # Intersection: only pools present in EVERY character
+        pool_sets = [set(cd['base'].keys()) for cd in char_data]
+        intersection = pool_sets[0]
+        for ps in pool_sets[1:]:
+            intersection &= ps
+        pools = sorted(intersection)
+        # Count characters with unique pools
+        unique_count = sum(1 for cd in char_data if set(cd['base'].keys()) - intersection)
+        if not pools:
+            print("No common pools across characters. Use 'state current <name>' for per-character view.")
+            conn.close(); return
+
+    max_w = {p: max(len(p), 5) for p in pools}
+    print(f"{'Name':<16} {'Type':<4}", end="")
+    for p in pools:
+        print(f" {p:>{max_w[p]}}", end="")
+    print(f" {'Loc':<14} {'Status':<8} {'Last'}")
+    print("-" * (30 + sum(max_w.values())))
+    for cd in char_data:
+        print(f"{cd['name']:<16} {cd['type']:<4}", end="")
         for p in pools:
-            cur = totals.get(p, '?')
-            max_v = base.get(p, '?')
-            print(f" {cur if cur!='?' else '?':>{max_w[p]}}", end="")
-        print(f" {loc_s:<14} {status_s:<8} {reason_s}")
+            cur = cd['totals'].get(p, '?')
+            print(f" {cur:>{max_w[p]}}" if cur != '?' else f" {'?':>{max_w[p]}}", end="")
+        print(f" {cd['loc']:<14} {cd['status']:<8} {cd['reason']}")
+    if not name and unique_count:
+        print(f"\n({unique_count} character(s) have additional unique pools. Use 'state current <name>' for details.)")
     conn.close()
 
 
