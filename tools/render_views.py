@@ -104,4 +104,21 @@ html = tmpl.replace('<script src="panel.js"></script>', embed + '<script src="pa
 
 out = os.path.join(LOG, "panel.html")
 with open(out, 'w', encoding='utf-8') as f: f.write(html)
+
+# Copy web assets to output dir (panel.js/css — first-time setup)
+skill_root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+for asset in ['panel.js', 'panel.css']:
+    src = _os.path.join(skill_root, 'assets', asset)
+    dst = _os.path.join(LOG, asset)
+    if _os.path.exists(src):
+        with open(src, 'rb') as fsrc:
+            data = fsrc.read()
+        write_needed = True
+        if _os.path.exists(dst):
+            with open(dst, 'rb') as fdst:
+                write_needed = fdst.read() != data
+        if write_needed:
+            with open(dst, 'wb') as fdst:
+                fdst.write(data)
+
 print("{} ({}c/{}n/{}e/{}ch/{}td)".format(out, len(clues), len(npcs_), len(events), len(char_rows), len(todos)))
