@@ -186,6 +186,18 @@ if os.path.exists(tl_path):
     raw = open(tl_path, encoding='utf-8').read()
     for w in validate_table(raw, '03_时间线.md'): print(w)
     rows = parse_md_table(raw)
+    # Validate event_date format
+    import re as _re2
+    _date_ok = _re2.compile(r'^\d{4}(-\d{2}){0,2}(-[a-z])?$')
+    _date_bad = ['当日', '现在', '近日', '三天前', '案发后', '约', '左右']
+    for r in rows:
+        ed = (r.get('event_date') or '').strip()
+        if not ed:
+            print('  ⚠ timeline missing event_date: "' + (r.get('event') or r.get('time','?'))[:30] + '"')
+        elif not _date_ok.match(ed):
+            print('  ⚠ timeline event_date invalid: "' + ed + '" ← "' + (r.get('event',''))[:20] + '"')
+        elif any(b in ed for b in _date_bad):
+            print('  ⚠ timeline event_date has bad keyword: "' + ed + '"')
     if rows: conn.execute("DELETE FROM timeline_events")
     n = 0
     for r in rows:
