@@ -1,9 +1,26 @@
-// === Panel Renderer v1.8 — pure JS, data from API or embedded ===
-(function(){if(window.DATA)init(DATA);else{fetch('api/data').then(function(r){return r.json()}).then(init).catch(function(){document.getElementById('dash').textContent='API unreachable — start serve.py'})}})();
-function init(DATA) {
-window.DATA = DATA;
+// === Panel Renderer v1.8 — always prefer API, embedded DATA as fallback ===
+(function(){
+  function boot(D) { try { init(D); } catch(e) { bootFallback(e); } }
+  function bootFallback(err) {
+    var d = document.getElementById('dash');
+    if (d) d.textContent = 'Render error — check console';
+    if (window.DATA && window.DATA !== lastAttempt) { lastAttempt = window.DATA; try { init(window.DATA); return; } catch(e2) {} }
+    if (d) d.textContent = 'API unreachable — start serve.py and refresh';
+  }
+  var lastAttempt = window.DATA;
+  fetch('api/data').then(function(r){ return r.json(); }).then(boot).catch(function(){ boot(window.DATA); });
+})();
 
-// --- Render dash ---
+function init(DATA) {
+  if (!DATA || !DATA.clues) { var d = document.getElementById('dash'); if (d) d.textContent = 'No data'; return; }
+  window.DATA = DATA;
+  try { renderAll(); } catch(e) { var d = document.getElementById('dash'); if (d) d.textContent = 'Render error: ' + (e.message || e); }
+}
+
+function renderAll() {
+  var DATA = window.DATA;
+
+  // --- Render dash ---
 var pc = DATA.chars.filter(function(c){return c.type==='pc'});
 var dp = [];
 for (var i=0;i<pc.length;i++){
@@ -98,12 +115,13 @@ if (dsh) {
 }
 
 // === Data rendering ===
-if (typeof DATA === 'undefined') { console.warn('No DATA'); return; }
+// (moved inside renderAll() called by init())
 
 function vl(k) { return DATA.labels.verified[k] || k; }
 function cl(k) { return DATA.labels.confidence[k] || k; }
 
 // Clue cards — compact: ID + badges on top, content truncated below
+try {
 var ct = document.getElementById('ct');
 if (ct && DATA.clues) {
   var h = '';
@@ -117,6 +135,7 @@ if (ct && DATA.clues) {
   }
   ct.innerHTML = h;
 }
+} catch(e) { if (ct) ct.innerHTML = '<div style="color:#e94560">Clue render error</div>'; }
 
 // NPC cards
 var nt = document.getElementById('nt');
@@ -280,6 +299,8 @@ if (tl && DATA.todos) {
   }
   tl.innerHTML = h;
 }
+
+} // end renderAll()
 
 // === Drill-down popup ===
 var drillStack = [];
@@ -626,5 +647,3 @@ function openRelated(id) {
   drill([{html: h}], clue.id);
 }
 window.openRelated = openRelated;
-
-});
