@@ -38,7 +38,8 @@ var tabs = [
   {id:'tl',label:'时间线'},{id:'chars',label:'角色'},{id:'todos',label:'待办'}
 ];
 var nav = document.querySelector('nav');
-nav.innerHTML = tabs.map(function(t,i){return '<button class=\"'+(i===0?'active':'')+'\" onclick=\"S(this,\\\"'+t.id+'\\\")\">'+t.label+'</button>'}).join('');
+nav.innerHTML = tabs.map(function(t,i){return '<button class="'+(i===0?'active':'')+'" data-panel="'+t.id+'">'+t.label+'</button>'}).join('');
+nav.querySelectorAll('button').forEach(function(btn){ btn.addEventListener('click',function(){ S(this,this.dataset.panel); }); });
 
 // --- Render ts ---
 document.getElementById('ts').textContent = '更新于 '+new Date().toLocaleString('zh-CN')+' · v1.8';
