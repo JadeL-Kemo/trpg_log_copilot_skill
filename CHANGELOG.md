@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ---
 
+## [1.8.3] — 2026-07-23
+
+### Added
+
+- **图片支持** — 线索 content 用 `img:文件名.jpg 描述` 前缀 → 面板自动渲染 `<img>`（零 schema 变更）
+- **关联符号一览** — SKILL 文档化全部 6 种关联符号（`img:`/`→ CL-XXX`/`(类型,mutual)` 等）
+
+### Changed
+
+- `renderContent()` 辅助函数——统一处理图片 + 文本
+
+---
+
 ## [1.7.0] — 2026-07-23
 
 ### Added
