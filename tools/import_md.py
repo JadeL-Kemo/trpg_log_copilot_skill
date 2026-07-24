@@ -230,6 +230,11 @@ if os.path.exists(tl_path):
         timeline_status = r.get('timeline_status', 'canon') or 'canon'
         notes = r.get('notes', None)
         scene_id = r.get('scene_id', None)
+        # Auto-suffix: AI writes bare YYYY-MM-DD, import assigns -010/-020/-030...
+        if event_date and _re2.match(r'^\d{4}-\d{2}-\d{2}$', event_date):
+            cnt = conn.execute("SELECT COUNT(*) FROM timeline_events WHERE event_date LIKE ?",
+                (event_date + '-%',)).fetchone()[0]
+            event_date = event_date + '-{0:03d}'.format(cnt * 10 + 10)
         conn.execute(
             "INSERT OR REPLACE INTO timeline_events (event_time,event,participants,related_clues,category,event_date,timeline_status,notes,scene_id) VALUES (?,?,?,?,?,?,?,?,?)",
             (event_time, event_text,
