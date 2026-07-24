@@ -18,8 +18,28 @@ function init(DATA) {
   try { renderAll(); } catch(e) { var d = document.getElementById('dash'); if (d) d.textContent = 'Render error: ' + (e.message || e); }
 }
 
+function eventSortKey(t) {
+  if (!t) return '9999';
+  var s = (t.event_time || '');
+  // 第N天 → day_N
+  var m = s.match(/第(\d+)天/);
+  if (m) return String(10000 + parseInt(m[1]) * 100).slice(1);
+  // HH:MM prefixed
+  m = s.match(/^(\d{2}:\d{2})/);
+  if (m) return '20' + m[1];
+  // Day-after tags
+  if (/半天后|事后/.test(s)) return '9100';
+  if (/次日|翌日/.test(s)) return '9200';
+  if (/数日/.test(s)) return '9300';
+  // Relative: "事发前"/"约一个月前" → 0000
+  if (/前/.test(s)) return '0000';
+  return '5000';
+}
+
 function renderAll() {
   var DATA = window.DATA;
+  // Sort events by sort key
+  if (DATA.events) DATA.events.sort(function(a,b){ return eventSortKey(a).localeCompare(eventSortKey(b)) || (a.event_time||'').localeCompare(b.event_time||''); });
 
   // --- Render dash ---
 var pc = DATA.chars.filter(function(c){return c.type==='pc'});
@@ -60,16 +80,12 @@ window.S = S;
 
 // Refresh
 function R() { fetch('api/data').then(function(r){return r.json()}).then(function(d){window.DATA=d;renderAll()}).catch(function(){location.reload()}); }
-// Hash-based tab persistence
+// Hash-based tab persistence (simplified — dataset.panel)
 (function(){
   var hash = location.hash.replace('#','');
-  if (hash && document.getElementById(hash)) {
-    var btns = document.querySelectorAll('nav button');
-    for (var i=0;i<btns.length;i++) {
-      if (btns[i].textContent === ({clues:'clues',npcs:'npcs',tl:'tl',chars:'chars',todos:'todos'})[hash] || btns[i].onclick.toString().indexOf("S(this,'"+hash+"')")>=0) {
-        S(btns[i], hash); break;
-      }
-    }
+  if (hash) {
+    var btn = document.querySelector('nav button[data-panel="'+hash+'"]');
+    if (btn) S(btn, hash);
   }
 })();
 
@@ -140,9 +156,10 @@ if (ct && DATA.clues) {
   for (var i = 0; i < DATA.clues.length; i++) {
     var c = DATA.clues[i];
     var cf = c.confidence || 'medium';
+    var vf = c.verified || 'confirmed';
     var ctText = (c.content||'').replace(/^img:\S+\s*/,'');
     h += '<div class="wiki-card" onclick="openRelated(\'' + c.id + '\')">' +
-      '<div style="margin-bottom:2px">' + c.id + ' <span class="v-confirmed" style="font-size:10px;margin-right:4px">已证实</span><span class="c-' + cf + '">' + cl(cf) + '</span></div>' +
+      '<div style="margin-bottom:2px">' + c.id + ' <span class="v-' + vf + '" style="font-size:10px;margin-right:4px">' + vl(vf) + '</span><span class="c-' + cf + '">' + cl(cf) + '</span></div>' +
       '<div class="wiki-body">' + ctText + '</div>' +
       '</div>';
   }
@@ -623,7 +640,8 @@ function openRelated(id) {
   
   // Section 1: Header + detail
   h += '<div style="margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #2a3a5c">';
-  h += '<div style="margin-bottom:4px"><b>' + clue.id + '</b> <span class="v-confirmed" style="font-size:10px;margin-right:3px">已证实</span><span class="c-' + cf + '">' + cl(cf) + '</span></div>';
+  var vf = clue.verified || 'confirmed';
+  h += '<div style="margin-bottom:4px"><b>' + clue.id + '</b> <span class="v-' + vf + '" style="font-size:10px;margin-right:3px">' + vl(vf) + '</span><span class="c-' + cf + '">' + cl(cf) + '</span></div>';
   h += '<div style="font-size:12px;color:#ccc;line-height:1.6;margin-bottom:4px">' + renderContent(clue.content) + '</div>';
   h += '<div style="font-size:11px;color:#888">来源: ' + clue.source + '</div>';
   h += '</div>';
