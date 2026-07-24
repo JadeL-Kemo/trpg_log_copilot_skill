@@ -99,11 +99,28 @@ def parse_state_annotations(text):
     return results
 
 
-# ============== Import loop ==============
+# ============== Load sync.ini ==============
+import configparser
+_sync_paths = {
+    '01_clues': '01_线索.md', '02_npcs': '02_人物.md',
+    '03_timeline': '03_时间线.md', '03a_chronicle': '03a_大纪事.md',
+    '04_action': '04_行动日志.md', '06_todos': '06_待办.md',
+}
+ini_path = os.path.join(LOG, "sync.ini")
+if os.path.exists(ini_path):
+    cfg = configparser.ConfigParser()
+    cfg.read(ini_path, encoding='utf-8')
+    if cfg.has_section('sync'):
+        for key, val in cfg.items('sync'):
+            _sync_paths[key] = val
+def _path(key):
+    return os.path.join(LOG, _sync_paths.get(key, ''))
+
+# --- Import loop ---
 conn = sqlite3.connect(DB); imported = 0
 
 # 01_线索.md
-clue_path = os.path.join(LOG, "01_线索.md")
+clue_path = _path('01_clues')
 if os.path.exists(clue_path):
     raw = open(clue_path, encoding='utf-8').read()
     for w in validate_table(raw, '01_线索.md'): print(w)
@@ -114,6 +131,8 @@ if os.path.exists(clue_path):
         verified = r.get('verified', 'pending')
         if verified != 'confirmed': skipped += 1; continue
         tags = parse_clue_tags(r.get('tags', ''))
+        if not tags and r.get('tags','').strip() == '':
+            print('  ⚠ empty tags: ' + r['id'] + ' — FTS5 search degraded')
         linked = parse_clue_linked(r.get('linked', ''))
         confidence = r.get('confidence', 'medium')
         conn.execute(
@@ -128,7 +147,7 @@ else:
     print("No 01_线索.md")
 
 # 02_人物.md
-npc_path = os.path.join(LOG, "02_人物.md")
+npc_path = _path('02_npcs')
 if os.path.exists(npc_path):
     text = open(npc_path, encoding='utf-8').read()
     # Only parse the first table (before narrative text)
@@ -181,7 +200,7 @@ if os.path.exists(npc_path):
     print("Relations: {0} edges".format(rel_cnt))
 
 # 03_时间线.md
-tl_path = os.path.join(LOG, "03_时间线.md")
+tl_path = _path('03_timeline')
 if os.path.exists(tl_path):
     raw = open(tl_path, encoding='utf-8').read()
     for w in validate_table(raw, '03_时间线.md'): print(w)
@@ -221,7 +240,7 @@ if os.path.exists(tl_path):
     print("Timeline: {0}".format(n))
 
 # 03a_大纪事.md
-chr_path = os.path.join(LOG, "03a_大纪事.md")
+chr_path = _path('03a_chronicle')
 if os.path.exists(chr_path):
     raw = open(chr_path, encoding='utf-8').read()
     for w in validate_table(raw, '03a_大纪事.md'): print(w)
@@ -244,7 +263,7 @@ if os.path.exists(chr_path):
     print("Chronicle: {0}".format(n))
 
 # 04_行动日志.md
-action_path = os.path.join(LOG, "04_行动日志.md")
+action_path = _path('04_action')
 if os.path.exists(action_path):
     states = parse_state_annotations(open(action_path, encoding='utf-8').read())
     n = 0
@@ -263,7 +282,6 @@ if os.path.exists(action_path):
     print("States: {0}".format(n))
 
 # === Narrative import: sync.ini → narrative_chunks ===
-import configparser
 ini_path = os.path.join(LOG, "sync.ini")
 if os.path.exists(ini_path):
     cfg = configparser.ConfigParser()
