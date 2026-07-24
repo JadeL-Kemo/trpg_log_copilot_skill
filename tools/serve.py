@@ -152,6 +152,30 @@ class PanelHandler(http.server.SimpleHTTPRequestHandler):
                 "status": last['status_new'] if last and last['status_new'] else '-'})
         conn2.close()
         data["chars"] = chars
+
+        # Todos — parsed from MD (no SQL table)
+        import re as _re3
+        todos = []
+        valid_ids = {c['id'] for c in data['clues']}
+        todo_path = os.path.join('.', '06_待办.md')
+        if os.path.exists(todo_path):
+            for line in open(todo_path, encoding='utf-8').readlines():
+                line = line.strip()
+                if not (line.startswith('- [') or line.startswith('- ')): continue
+                done = '[x]' in line[:6]
+                task = line[line.find(']')+1:].strip() if ']' in line[:6] else line[2:].strip()
+                priority = line[line.find('[')+1:line.find(']')] if '[' in line[:6] else ''
+                reason = ''
+                rm = _re3.search(r'\((.+?)\)', task)
+                if rm: reason = rm.group(1); task = _re3.sub(r'\s*\(.+?\)', '', task)
+                ref_ids = []
+                m = _re3.search(r'→?\s*(CL-\d[\d,\s]*)', task)
+                if m:
+                    ref_ids = [x.strip() for x in _re3.split(r'[,，\s]+', m.group(1)) if x.strip() and x.strip() in valid_ids]
+                    task = _re3.sub(r'→?\s*CL-\d[\d,\s]*', '', task).strip()
+                todos.append({"task": task, "priority": priority, "done": done, "reason": reason, "ref_ids": ref_ids})
+        data["todos"] = todos
+
         self._json_resp(data)
     
     def _json_resp(self, data):
