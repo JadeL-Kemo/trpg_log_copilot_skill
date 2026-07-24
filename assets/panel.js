@@ -207,6 +207,7 @@ function openTimeline(idx) {
   // Section 1: Detail
   h += '<div style="margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #2a3a5c">';
   h += '<div style="margin-bottom:4px"><b>' + e.event_time + '</b> ' + e.event + '</div>';
+  if (e.created_at) h += '<div style="font-size:9px;color:#555;margin-bottom:4px">记录: ' + e.created_at + '</div>';
   if (e.notes) h += '<div style="font-size:12px;color:#ccc;line-height:1.6;margin-bottom:4px">' + e.notes + '</div>';
   h += '</div>';
   // Section 2: Scene log — always shown, text updated async
